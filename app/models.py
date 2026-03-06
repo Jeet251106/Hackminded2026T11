@@ -1,6 +1,6 @@
 ﻿import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -14,10 +14,21 @@ class UserRole(str, enum.Enum):
 
 
 class FileStatus(str, enum.Enum):
+    pending_sweep = "PENDING_SWEEP"
+    sweep_passed = "SWEEP_PASSED"
+    quarantined = "QUARANTINED"
+    scanning = "SCANNING"
+    sealed = "SEALED"
+    failed = "FAILED"
+    # Backward compatibility for previous values
     pending = "pending"
-    scanning = "scanning"
     completed = "completed"
-    failed = "failed"
+
+
+class SweepStatus(str, enum.Enum):
+    pending = "PENDING"
+    passed = "PASSED"
+    quarantined = "QUARANTINED"
 
 
 class EventType(str, enum.Enum):
@@ -31,6 +42,17 @@ class EventType(str, enum.Enum):
     logout = "logout"
     admin_action = "admin_action"
 
+    security_sweep_passed = "SECURITY_SWEEP_PASSED"
+    security_sweep_failed = "SECURITY_SWEEP_FAILED"
+    case_quarantined = "CASE_QUARANTINED"
+    auto_destruct = "AUTO_DESTRUCT"
+    duplicate_detected = "DUPLICATE_DETECTED"
+    bot_submission_detected = "BOT_SUBMISSION_DETECTED"
+    exif_stripped = "EXIF_STRIPPED"
+    magic_byte_mismatch = "MAGIC_BYTE_MISMATCH"
+    operative_suspended = "OPERATIVE_SUSPENDED"
+    context_link_skipped = "CONTEXT_LINK_SKIPPED"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -43,6 +65,17 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class CaseBatch(Base):
+    __tablename__ = "case_batches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    operative_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    total_files: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    completed_files: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class CaseFile(Base):
     __tablename__ = "case_files"
 
@@ -50,11 +83,18 @@ class CaseFile(Base):
     original_path: Mapped[str] = mapped_column(String(500), nullable=False)
     sanitized_path: Mapped[str] = mapped_column(String(500), nullable=False)
     file_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    status: Mapped[FileStatus] = mapped_column(Enum(FileStatus), default=FileStatus.pending, nullable=False)
+    status: Mapped[FileStatus] = mapped_column(Enum(FileStatus), default=FileStatus.pending_sweep, nullable=False)
+    sweep_status: Mapped[SweepStatus] = mapped_column(Enum(SweepStatus), default=SweepStatus.pending, nullable=False)
     risk_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     pii_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    batch_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("case_batches.id"), nullable=True, index=True)
+    file_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False, index=True)
+    vt_report: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    exif_stripped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow() + timedelta(hours=24), nullable=False, index=True)
 
     entities: Mapped[list["PiiEntity"]] = relationship(back_populates="case_file", cascade="all, delete-orphan")
 

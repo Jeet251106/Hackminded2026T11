@@ -14,6 +14,26 @@ from app.core.config import settings
 SUPPORTED_TYPES = {".pdf", ".docx", ".sql", ".csv", ".json", ".txt", ".png", ".jpg", ".jpeg"}
 IMAGE_TYPES = {".png", ".jpg", ".jpeg"}
 
+SIZE_THRESHOLDS = {
+    ".pdf": (5 * 1024, 50 * 1024 * 1024),
+    ".docx": (2 * 1024, 50 * 1024 * 1024),
+    ".sql": (100, 100 * 1024 * 1024),
+    ".csv": (10, 100 * 1024 * 1024),
+    ".json": (10, 100 * 1024 * 1024),
+    ".txt": (1, 10 * 1024 * 1024),
+    ".png": (5 * 1024, 20 * 1024 * 1024),
+    ".jpg": (5 * 1024, 20 * 1024 * 1024),
+    ".jpeg": (5 * 1024, 20 * 1024 * 1024),
+}
+
+MAGIC_BYTES = {
+    ".pdf": b"%PDF",
+    ".docx": b"PK\x03\x04",
+    ".png": b"\x89PNG",
+    ".jpg": b"\xff\xd8\xff",
+    ".jpeg": b"\xff\xd8\xff",
+}
+
 
 @dataclass
 class OcrToken:
@@ -34,6 +54,41 @@ def ensure_storage_dirs(raw_path: Path, sanitized_path: Path) -> None:
 async def save_upload(upload: UploadFile, destination: Path) -> None:
     data = await upload.read()
     destination.write_bytes(data)
+
+
+def validate_file_size(extension: str, size: int) -> None:
+    if extension not in SIZE_THRESHOLDS:
+        return
+    min_b, max_b = SIZE_THRESHOLDS[extension]
+    if size < min_b or size > max_b:
+        raise ValueError(f"File size anomaly for {extension}: {size} bytes")
+
+
+def validate_magic_bytes(file_bytes: bytes, extension: str) -> None:
+    expected = MAGIC_BYTES.get(extension)
+    if expected and not file_bytes.startswith(expected):
+        raise ValueError("File header does not match extension")
+
+
+def strip_exif_if_image(file_bytes: bytes, extension: str) -> tuple[bytes, bool, int]:
+    if extension not in IMAGE_TYPES:
+        return file_bytes, False, 0
+
+    try:
+        from PIL import Image
+    except Exception:
+        return file_bytes, False, 0
+
+    img = Image.open(io.BytesIO(file_bytes))
+    exif = img.getexif()
+    exif_count = len(exif) if exif else 0
+
+    clean = Image.new(img.mode, img.size)
+    clean.putdata(list(img.getdata()))
+    out = io.BytesIO()
+    format_hint = "PNG" if extension == ".png" else "JPEG"
+    clean.save(out, format=format_hint)
+    return out.getvalue(), exif_count > 0, exif_count
 
 
 def _extract_docx_text(path: Path) -> str:
@@ -132,6 +187,37 @@ def extract_text(path: Path) -> str:
     raise ValueError(f"Unsupported file format: {suffix}")
 
 
+def extract_context_hints(path: Path) -> list[str]:
+    suffix = path.suffix.lower()
+    hints: list[str] = []
+
+    try:
+        if suffix == ".json":
+            data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+
+            def walk(obj):
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        hints.append(str(k).lower())
+                        walk(v)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        walk(item)
+
+            walk(data)
+        elif suffix == ".csv":
+            first_line = path.read_text(encoding="utf-8", errors="ignore").splitlines()[:1]
+            if first_line:
+                hints.extend([c.strip().lower() for c in first_line[0].split(",")])
+        elif suffix == ".sql":
+            text = path.read_text(encoding="utf-8", errors="ignore").lower()
+            hints.extend(re.findall(r"\b[a-z_][a-z0-9_]{2,}\b", text)[:300])
+    except Exception:
+        pass
+
+    return list(dict.fromkeys(hints))
+
+
 def _write_pdf(path: Path, sanitized_text: str) -> None:
     try:
         from reportlab.lib.pagesizes import A4
@@ -141,7 +227,7 @@ def _write_pdf(path: Path, sanitized_text: str) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     c = canvas.Canvas(str(path), pagesize=A4)
-    width, height = A4
+    _, height = A4
     y = height - 40
     c.setFont("Helvetica", 10)
 

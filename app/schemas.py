@@ -76,6 +76,10 @@ class DetokenizeResponse(BaseModel):
     original_value: str
 
 
+class BulkDownloadRequest(BaseModel):
+    file_ids: list[str]
+
+
 class AuditLogOut(BaseModel):
     id: str
     event_type: EventType

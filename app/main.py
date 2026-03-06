@@ -5,8 +5,11 @@ from fastapi import FastAPI
 from app.core.config import settings
 from app.database import Base, SessionLocal, engine
 from app.routers import audit, auth, dashboard, files, scan, tokens, upload, users
+from app.services.auto_destruct_service import auto_destruct_service
 from app.services.bootstrap import ensure_admin_user
 from app.services.file_service import ensure_storage_dirs
+
+scheduler = None
 
 
 @asynccontextmanager
@@ -20,7 +23,21 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    yield
+    global scheduler
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(auto_destruct_service.run_once, "interval", minutes=30)
+        scheduler.start()
+    except Exception:
+        scheduler = None
+
+    try:
+        yield
+    finally:
+        if scheduler:
+            scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     fernet_key: str = ""
     tesseract_cmd: str = ""
+    virustotal_api_key: str = ""
 
     storage_root: str = "storage"
     raw_bucket: str = "raw-case-files"

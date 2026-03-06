@@ -14,3 +14,4 @@ pytesseract==0.3.13
 reportlab==4.2.5
 supabase==2.18.1
 psycopg2-binary==2.9.10
+apscheduler==3.10.4
