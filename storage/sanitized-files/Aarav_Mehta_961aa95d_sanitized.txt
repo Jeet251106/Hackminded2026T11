@@ -1,0 +1,15 @@
+Aarav Mehta
+DOB: 14 March 1992
+Mobile: +91 [REDACTED]
+Email: [REDACTED]hantiniketan Society, Satellite Road, Ahmedabad
+PAN: [REDACTED]
+Aadhaar: [REDACTED]
+Passport: T4921881
+Bank: HDFC Bank
+Account: [REDACTED]
+IFSC: [REDACTED]
+UPI: [REDACTED]
+IP: [REDACTED]
+Device ID: android-9f31acb8d1
+[REDACTED]: fp_hash_a92bf71e3d51
+Face Template: face_tmp_5c21ab9d
