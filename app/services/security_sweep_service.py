@@ -1,4 +1,4 @@
-﻿import json
+import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ class SweepResult:
     report: dict
 
 
-class SecuritySweepService:
+class MalwareScanService:
     BASE = "https://www.virustotal.com/api/v3/files"
 
     def __init__(self) -> None:
@@ -43,4 +43,4 @@ class SecuritySweepService:
         return SweepResult(status="PASSED", report={"stats": stats})
 
 
-security_sweep_service = SecuritySweepService()
+malware_scan_service = MalwareScanService()

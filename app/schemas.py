@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr
@@ -8,6 +8,7 @@ from app.models import EventType, FileStatus, UserRole
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
 
 
@@ -16,10 +17,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
     role: UserRole = UserRole.user
+    bureau_field: str = ""
 
 
 class UserOut(BaseModel):
@@ -40,6 +46,8 @@ class CaseFileOut(BaseModel):
     pii_count: int
     created_at: datetime
     uploaded_by: str
+    owner_id: str | None = None
+    expires_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -53,6 +61,7 @@ class PiiEntityOut(BaseModel):
     detection_layer: str
     char_start: int
     char_end: int
+    original_value: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

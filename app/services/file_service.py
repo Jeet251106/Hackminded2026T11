@@ -1,4 +1,4 @@
-﻿import io
+import io
 import json
 import re
 import zipfile
@@ -11,12 +11,13 @@ from fastapi import UploadFile
 from app.core.config import settings
 
 
-SUPPORTED_TYPES = {".pdf", ".docx", ".sql", ".csv", ".json", ".txt", ".png", ".jpg", ".jpeg"}
+SUPPORTED_TYPES = {".pdf", ".docx", ".sql", ".csv", ".json", ".txt", ".png", ".jpg", ".jpeg", ".xlsx"}
 IMAGE_TYPES = {".png", ".jpg", ".jpeg"}
 
 SIZE_THRESHOLDS = {
     ".pdf": (5 * 1024, 50 * 1024 * 1024),
     ".docx": (2 * 1024, 50 * 1024 * 1024),
+    ".xlsx": (10, 50 * 1024 * 1024),
     ".sql": (100, 100 * 1024 * 1024),
     ".csv": (10, 100 * 1024 * 1024),
     ".json": (10, 100 * 1024 * 1024),
@@ -29,6 +30,7 @@ SIZE_THRESHOLDS = {
 MAGIC_BYTES = {
     ".pdf": b"%PDF",
     ".docx": b"PK\x03\x04",
+    ".xlsx": b"PK\x03\x04",
     ".png": b"\x89PNG",
     ".jpg": b"\xff\xd8\xff",
     ".jpeg": b"\xff\xd8\xff",
@@ -66,8 +68,14 @@ def validate_file_size(extension: str, size: int) -> None:
 
 def validate_magic_bytes(file_bytes: bytes, extension: str) -> None:
     expected = MAGIC_BYTES.get(extension)
-    if expected and not file_bytes.startswith(expected):
-        raise ValueError("File header does not match extension")
+    if not expected:
+        return
+    if file_bytes.startswith(expected):
+        return
+    # Some PDFs can have leading whitespace/newlines before the header.
+    if extension == ".pdf" and file_bytes[:1024].lstrip().startswith(expected):
+        return
+    raise ValueError("File header does not match extension")
 
 
 def strip_exif_if_image(file_bytes: bytes, extension: str) -> tuple[bytes, bool, int]:
@@ -110,6 +118,37 @@ def _extract_pdf_text(path: Path) -> str:
     for page in reader.pages:
         text.append(page.extract_text() or "")
     return "\n".join(text)
+
+
+def _xlsx_to_lines(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
+    """
+    Flatten an .xlsx into a stable list of string lines (one per string cell).
+    Returns (lines, coords) where coords items are (sheet_name, cell_coordinate).
+    This is used both for extraction and writing sanitized output back.
+    """
+    try:
+        from openpyxl import load_workbook
+    except Exception as exc:
+        raise RuntimeError("openpyxl is required for XLSX parsing") from exc
+
+    wb = load_workbook(filename=str(path), data_only=True)
+    lines: list[str] = []
+    coords: list[tuple[str, str]] = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                v = cell.value
+                if isinstance(v, str) and v.strip():
+                    # Avoid introducing newlines that break mapping
+                    safe = " ".join(v.splitlines()).strip()
+                    lines.append(safe)
+                    coords.append((ws.title, cell.coordinate))
+    return lines, coords
+
+
+def _extract_xlsx_text(path: Path) -> str:
+    lines, _ = _xlsx_to_lines(path)
+    return "\n".join(lines)
 
 
 def _configure_tesseract(pytesseract_module) -> None:
@@ -182,6 +221,8 @@ def extract_text(path: Path) -> str:
         return _extract_docx_text(path)
     if suffix == ".pdf":
         return _extract_pdf_text(path)
+    if suffix == ".xlsx":
+        return _extract_xlsx_text(path)
     if suffix in IMAGE_TYPES:
         return _extract_image_text(path)
     raise ValueError(f"Unsupported file format: {suffix}")
@@ -212,6 +253,22 @@ def extract_context_hints(path: Path) -> list[str]:
         elif suffix == ".sql":
             text = path.read_text(encoding="utf-8", errors="ignore").lower()
             hints.extend(re.findall(r"\b[a-z_][a-z0-9_]{2,}\b", text)[:300])
+        elif suffix == ".xlsx":
+            # sheet names and first-row strings are useful anchors for contextual linking
+            try:
+                from openpyxl import load_workbook
+            except Exception:
+                return []
+            wb = load_workbook(filename=str(path), data_only=True, read_only=True)
+            for ws in wb.worksheets[:10]:
+                hints.append(ws.title.lower())
+                try:
+                    first = next(ws.iter_rows(min_row=1, max_row=1))
+                except StopIteration:
+                    continue
+                for cell in first[:30]:
+                    if isinstance(cell.value, str) and cell.value.strip():
+                        hints.append(cell.value.strip().lower())
     except Exception:
         pass
 
@@ -272,6 +329,31 @@ def _write_docx(path: Path, sanitized_text: str) -> None:
         zf.writestr("word/document.xml", document_xml)
 
 
+def _write_xlsx(template_path: Path, output_path: Path, sanitized_text: str) -> None:
+    try:
+        from openpyxl import load_workbook
+    except Exception as exc:
+        raise RuntimeError("openpyxl is required for XLSX output") from exc
+
+    lines, coords = _xlsx_to_lines(template_path)
+    sanitized_lines = sanitized_text.splitlines()
+    wb = load_workbook(filename=str(template_path))
+
+    # Best-effort mapping: if the line count diverges, don't crash.
+    if len(sanitized_lines) != len(lines):
+        ws = wb.worksheets[0]
+        ws["A1"].value = sanitized_text[:32000]
+    else:
+        for (sheet_name, cell_coord), new_val in zip(coords, sanitized_lines, strict=False):
+            try:
+                wb[sheet_name][cell_coord].value = new_val
+            except Exception:
+                continue
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(str(output_path))
+
+
 def write_sanitized_output(path: Path, sanitized_text: str) -> None:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
@@ -280,8 +362,14 @@ def write_sanitized_output(path: Path, sanitized_text: str) -> None:
     if suffix == ".docx":
         _write_docx(path, sanitized_text)
         return
+    if suffix == ".xlsx":
+        raise RuntimeError("Use write_sanitized_xlsx() for XLSX output")
 
     path.write_text(sanitized_text, encoding="utf-8")
+
+
+def write_sanitized_xlsx(template_path: Path, output_path: Path, sanitized_text: str) -> None:
+    _write_xlsx(template_path=template_path, output_path=output_path, sanitized_text=sanitized_text)
 
 
 def as_download_stream(content: bytes):

@@ -1,9 +1,9 @@
-﻿import hashlib
+import hashlib
 import json
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.core.time import now_ist
 from app.models import AuditLog, EventType
 
 
@@ -22,7 +22,7 @@ def create_audit_log(
     metadata = metadata or {}
     prev = db.query(AuditLog).order_by(AuditLog.created_at.desc()).first()
     prev_hash = prev.entry_hash if prev else ""
-    ts = datetime.utcnow().isoformat()
+    ts = now_ist().isoformat()
     payload = json.dumps(
         {
             "event_type": event_type.value,

@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,19 +13,20 @@ class Settings(BaseSettings):
 
     jwt_secret_key: str = "change-me-super-secret"
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60 * 12
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
 
     fernet_key: str = ""
     tesseract_cmd: str = ""
     virustotal_api_key: str = ""
 
     storage_root: str = "storage"
-    raw_bucket: str = "raw-case-files"
+    raw_bucket: str = "raw-files"
     sanitized_bucket: str = "sanitized-files"
 
     supabase_url: str = ""
     supabase_service_role_key: str = ""
-    supabase_raw_bucket: str = "raw-case-files"
+    supabase_raw_bucket: str = "raw-files"
     supabase_sanitized_bucket: str = "sanitized-files"
 
     initial_admin_email: str = "lead.detective@casefiled.com"

@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -8,6 +8,7 @@ from app.deps import require_admin
 from app.models import CaseFile, EventType, PiiEntity, User
 from app.schemas import OverrideRequest
 from app.services.audit_service import create_audit_log
+from app.services.file_service import extract_text
 from app.services.masking_service import compute_risk_score
 
 router = APIRouter(prefix="/scan", tags=["scan"])
@@ -35,7 +36,10 @@ def override_entity(
     text_len = 1
     sanitized_path = Path(case.sanitized_path)
     if sanitized_path.exists():
-        text_len = max(1, len(sanitized_path.read_text(encoding="utf-8", errors="ignore")))
+        try:
+            text_len = max(1, len(extract_text(sanitized_path)))
+        except Exception:
+            text_len = max(1, len(sanitized_path.read_bytes()))
 
     fake_detections = [
         type("D", (), {"entity_type": e.entity_type, "start": e.char_start, "end": e.char_end}) for e in active
@@ -44,10 +48,11 @@ def override_entity(
 
     create_audit_log(
         db,
-        event_type=EventType.admin_action,
+        event_type=EventType.false_positive_override,
         user_id=admin.id,
         file_id=file_id,
-        metadata={"action": "override_entity", "entity_id": entity.id, "false_positive": payload.is_false_positive},
+        metadata={"entity_id": entity.id, "false_positive": payload.is_false_positive},
     )
     db.commit()
     return {"message": "Override saved", "pii_count": case.pii_count, "risk_score": case.risk_score}
+

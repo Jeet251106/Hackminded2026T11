@@ -1,4 +1,4 @@
-﻿import io
+import io
 import mimetypes
 import zipfile
 from pathlib import Path
@@ -116,7 +116,26 @@ def file_result(file_id: str, db: Session = Depends(get_db), user: User = Depend
         ]
         return CaseResultOut(file=case, entities=masked_entities)
 
-    return CaseResultOut(file=case, entities=entities)
+    admin_entities = []
+    for e in entities:
+        try:
+            orig = crypto_service.decrypt_text(e.original_value)
+        except Exception:
+            orig = "[decrypt failed]"
+        admin_entities.append(
+            PiiEntityOut(
+                id=e.id,
+                entity_type=e.entity_type,
+                masked_value=e.masked_value,
+                token_key=e.token_key,
+                confidence=e.confidence,
+                detection_layer=e.detection_layer,
+                char_start=e.char_start,
+                char_end=e.char_end,
+                original_value=orig,
+            )
+        )
+    return CaseResultOut(file=case, entities=admin_entities)
 
 
 @router.get("/{file_id}/download")
@@ -152,7 +171,9 @@ def download_sanitized(file_id: str, db: Session = Depends(get_db), user: User =
 @router.get("/{file_id}/original")
 def download_original(file_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if user.role != UserRole.admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+        create_audit_log(db, event_type=EventType.access_denied, user_id=user.id, file_id=file_id, metadata={"reason": "original_admin_only"})
+        db.commit()
+        raise HTTPException(status_code=404, detail="File not found")
 
     case = db.query(CaseFile).filter(CaseFile.id == file_id).first()
     if not case:
@@ -183,3 +204,4 @@ def download_original(file_id: str, db: Session = Depends(get_db), user: User = 
         media_type=mimetypes.guess_type(original_name)[0] or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{original_name}"'},
     )
+

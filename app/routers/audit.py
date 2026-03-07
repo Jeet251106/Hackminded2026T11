@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
@@ -34,9 +34,9 @@ def get_logs(
 @router.get("/export")
 def export_logs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != UserRole.admin:
-        # Operatives can export only their own logs
+        # Users can export only their own logs
         logs = db.query(AuditLog).filter(AuditLog.user_id == current_user.id).order_by(AuditLog.created_at.asc()).all()
-        filename = "operative_audit_log.pdf"
+        filename = "user_audit_log.pdf"
     else:
         logs = db.query(AuditLog).order_by(AuditLog.created_at.asc()).all()
         filename = "chain_of_custody.pdf"

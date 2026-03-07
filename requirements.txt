@@ -1,4 +1,4 @@
-﻿fastapi==0.115.6
+fastapi==0.115.6
 uvicorn[standard]==0.32.1
 sqlalchemy==2.0.36
 pydantic==2.11.7
@@ -12,6 +12,9 @@ pypdf==5.1.0
 Pillow==11.0.0
 pytesseract==0.3.13
 reportlab==4.2.5
-supabase==2.18.1
-psycopg2-binary==2.9.10
+openpyxl==3.1.5
+# Optional: only if using Supabase storage (omit for local file storage)
+# supabase==2.18.1
+# Optional: only if using PostgreSQL (omit for SQLite-only)
+# psycopg2-binary==2.9.10
 apscheduler==3.10.4

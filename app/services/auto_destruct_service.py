@@ -1,8 +1,8 @@
-﻿from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.core.time import now_ist_naive
 from app.database import SessionLocal
 from app.models import CaseFile, EventType
 from app.services.audit_service import create_audit_log
@@ -14,11 +14,11 @@ class AutoDestructService:
         db: Session = SessionLocal()
         deleted = 0
         try:
-            expired = db.query(CaseFile).filter(CaseFile.expires_at < datetime.utcnow()).all()
+            expired = db.query(CaseFile).filter(CaseFile.expires_at < now_ist_naive()).all()
             for case in expired:
                 if supabase_storage.enabled:
                     try:
-                        supabase_storage.client.storage.from_("raw-case-files").remove([case.original_path])
+                        supabase_storage.client.storage.from_("raw-files").remove([case.original_path])
                     except Exception:
                         pass
                     try:
@@ -31,7 +31,7 @@ class AutoDestructService:
 
                 create_audit_log(
                     db,
-                    event_type=EventType.auto_destruct,
+                    event_type=EventType.auto_deleted,
                     user_id=case.owner_id,
                     file_id=case.id,
                     metadata={"reason": "expires_at passed"},
